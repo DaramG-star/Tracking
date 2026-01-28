@@ -153,7 +153,6 @@ def main():
                         mid = prev_mid
                         route = matcher.masters[mid]["route_code"]
 
-                        # 🔴 이미 Missing이면 아무것도 안 함
                         if matcher.masters[mid]["status"] == "MISSING":
                             continue
 
@@ -181,7 +180,6 @@ def main():
                         mid = tmp_mid
                         route = matcher.masters[mid]["route_code"]
 
-                        # 🔥 Missing 즉시 판정 🔥
                         if route == "XSEA" and cam == "RPI_USB3":
 
                             # ✅ 이미 missing이면 재호출 금지
@@ -241,6 +239,8 @@ def main():
                 result = resolve_pending(matcher, mid, frame["time_s"])
                 if not result:
                     continue
+
+                matcher.cancel_pending(result["from_cam"], mid)
 
                 decision = result["decision"]
                 info["status"] = decision

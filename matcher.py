@@ -66,3 +66,19 @@ class FIFOGlobalMatcher:
         elif cam == "RPI_USB3_EOL":
             return self._try_fifo("q3e", "RPI_USB3", cam, time_s, width, uid)
         return None
+    # matcher.py 내부에 추가
+    def cancel_pending(self, from_cam, mid):
+        """실종된 객체를 해당 구간의 FIFO 큐에서 제거하여 Deadlock 방지"""
+        q_map = {
+            "USB_LOCAL": "q01",
+            "RPI_USB1": "q12",
+            "RPI_USB2": "q23",
+            "RPI_USB3": "q3e"
+        }
+        q_key = q_map.get(from_cam)
+        
+        # 큐의 맨 앞에 해당 mid가 있다면 제거
+        if q_key and self.queues[q_key] and self.queues[q_key][0] == mid:
+            self.queues[q_key].popleft()
+            return True
+        return False
