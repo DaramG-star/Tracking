@@ -18,6 +18,7 @@ CAM_SETTINGS = {
         "roi_y": 750, "roi_margin": 100,
         "dist_eps": 60, "max_dy": 120,
         "forward_sign": -1,
+        "dist": 0.0,  # 시작 지점 (스캐너)
         "parts": [("081952_961", "082029_085")]
     },
     "RPI_USB1": {
@@ -25,6 +26,7 @@ CAM_SETTINGS = {
         "roi_y": 400, "roi_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": 1,
+        "dist": 5.88,  # 시작점에서 5.88m 지점
         "parts": [("082008_660", "082046_675")]
     },
     "RPI_USB2": {
@@ -32,6 +34,7 @@ CAM_SETTINGS = {
         "roi_y": 160, "roi_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": -1,
+        "dist": 9.47,  # 시작점에서 9.47m 지점 (분류점 A) [쉼표(,)를 점(.)으로 수정]
         "parts": [("082018_216", "082054_026")]
     },
     "RPI_USB3": {
@@ -40,6 +43,7 @@ CAM_SETTINGS = {
         "eol_y": 690, "eol_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": 1,
+        "dist": 12.8,  # 시작점에서 12.8m 지점 (분류점 B)
         "parts": [("082028_591", "082107_610")]
     }
 }

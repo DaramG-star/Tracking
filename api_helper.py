@@ -2,6 +2,9 @@ import requests
 
 BASE_URL = "http://192.168.1.200:3000/api"
 
+# detect-missing API 호출 횟수 추적
+_missing_api_count = 0
+
 def api_scan(uid, route_code):
     """POST /api/scan: 스캐너에서 인식된 택배 등록"""
     try:
@@ -30,6 +33,9 @@ def api_pickup(uid):
 
 def api_missing(uid):
     """PATCH /api/detect-missing: 누락(오분류) 처리"""
+    global _missing_api_count
+    _missing_api_count += 1
+    print(f"[API 호출 #{_missing_api_count}] detect-missing: uid={uid}")
     try:
         requests.patch(f"{BASE_URL}/detect-missing", json={"uid": uid, "missed": True}, timeout=2)
     except Exception as e:
@@ -41,3 +47,7 @@ def api_eol(uid):
         requests.delete(f"{BASE_URL}/detect-eol/{uid}", timeout=2)
     except Exception as e:
         print(f"API Error (EOL): {e}")
+
+def get_missing_api_count():
+    """detect-missing API 호출 총 횟수 반환"""
+    return _missing_api_count

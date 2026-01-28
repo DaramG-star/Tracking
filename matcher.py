@@ -19,17 +19,14 @@ class FIFOGlobalMatcher:
         total_dist = config.ROUTE_TOTAL_DIST.get(route_code, 14.08)
 
         self.masters[mid] = {
-            "last_cam": cam, 
+            "last_cam": cam,
             "last_time": time_s,
-            "last_width": width, 
+            "last_width": width,
             "uids": {cam: uid},
             "route_code": route_code,
-            "status": "TRACKING",
-            # --- 실시간 거리 추계를 위한 신규 필드 추가 ---
-            "start_time": time_s,      # 기준점(USB_LOCAL) 통과 시간 고정
-            "total_dist": total_dist,  # 이 택배가 가야 할 총 거리
-            "last_reported_m": -1.0    # 마지막으로 API 전송한 거리 (0.5m 체크용)
-            # ------------------------------------------
+            "status": "TRACKING",        # TRACKING / PENDING / DISAPPEAR / PICKUP / MISSING
+            "pending_since": None,
+            "pending_from_cam": None
         }
         self.queues["q01"].append(mid)
         return mid
