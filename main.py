@@ -3,6 +3,7 @@ import pandas as pd
 from ultralytics import YOLO
 
 import config
+import api_helper 
 from utils import VideoManager
 from matcher import FIFOGlobalMatcher
 from loader import get_sorted_frames
@@ -50,19 +51,16 @@ def main():
             in_eol = (cam == "RPI_USB3" and eol_top < cy < eol_bot)
             if not (in_xseb or in_eol): continue
 
-            # Local Distance Matching
-            best_uid = None
-            best_score = 1e9
+            # Local Matching
+            best_uid, best_score = None, 1e9
             for uid, info in active_tracks[cam].items():
                 dx = abs(cx - info["last_pos"][0])
                 dy = (cy - info["last_pos"][1]) * cfg["forward_sign"]
                 if dx > cfg["dist_eps"] or dy < -5 or dy > cfg["max_dy"]: continue
-                
                 score = dx + dy * 0.3
-                if score < best_score:
-                    best_score, best_uid = score, uid
+                if score < best_score: best_score, best_uid = score, uid
 
-            # Global Matching
+            # Global Matching & API Triggers
             if best_uid:
                 mid = active_tracks[cam][best_uid]["master_id"]
                 label, color = mid, (0, 255, 0)
@@ -70,11 +68,30 @@ def main():
                 local_uid_counter[cam] += 1
                 best_uid = f"{cam}_{local_uid_counter[cam]:03d}"
                 match_cam = "RPI_USB3_EOL" if in_eol else cam
-                mid = matcher.try_match(match_cam, frame["time_s"], (x2 - x1), best_uid)
                 
-                global_events.append({
-                    "Master_ID": mid, "Camera": match_cam, "UID": best_uid, "Time": frame["ts"]
-                })
+                # 스캐너 연동 (USB_LOCAL 진입 시)
+                s_data = None
+                if cam == "USB_LOCAL":
+                    # 테스트용 가상 데이터 (실제론 스캐너 입력값 사용)
+                    s_data = {"uid": f"PKG_{frame['ts']}", "route_code": "XSEA"}
+                    api_helper.api_scan(s_data['uid'], s_data['route_code'])
+
+                mid = matcher.try_match(match_cam, frame["time_s"], (x2 - x1), best_uid, s_data)
+                
+                if mid:
+                    # 위치 업데이트 및 누락 감지
+                    api_helper.api_update_position(mid, cam)
+                    
+                    # XSEA 경로인데 RPI_USB3 영역에 나타나면 누락(Missing)
+                    route = matcher.masters[mid]['route_code']
+                    if cam == "RPI_USB3" and route == "XSEA":
+                        api_helper.api_missing(mid)
+                    
+                    # EOL 도달 시 Missing 및 데이터 삭제
+                    if match_cam == "RPI_USB3_EOL":
+                        api_helper.api_missing(mid)
+                        api_helper.api_eol(mid)
+
                 label = mid if mid else "UNMATCHED"
                 color = (0, 255, 0) if mid else (0, 0, 255)
 
@@ -82,12 +99,34 @@ def main():
             cv2.rectangle(disp, (x1, y1), (x2, y2), color, 2)
             cv2.putText(disp, label, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
+        # --- 상태 변경(Pickup/Disappeared) 감지 로직 ---
+        # 이전 프레임에는 있었으나 현재 프레임에서 사라진 객체 확인
+        for old_uid, old_info in active_tracks[cam].items():
+            if old_uid not in new_active:
+                mid = old_info["master_id"]
+                if not mid or mid not in matcher.masters: continue
+                
+                route = matcher.masters[mid]['route_code']
+                
+                # 1. XSEA 경로: RPI_USB2에서 사라지면 정상 픽업
+                if route == "XSEA" and cam == "RPI_USB2":
+                    api_helper.api_pickup(mid)
+                
+                # 2. XSEB 경로: RPI_USB3 ROI에서 사라지면(EOL 가기 전) 정상 픽업
+                elif route == "XSEB" and cam == "RPI_USB3":
+                    # EOL에 도달하지 않고 소멸했는지 확인 (단순 로직화)
+                    api_helper.api_pickup(mid)
+                
+                # 3. 그 외 구역 소멸: Disappeared (로그 출력)
+                elif cam in ["USB_LOCAL", "RPI_USB1"]:
+                    print(f"[*] Master {mid} disappeared at {cam}")
+
         active_tracks[cam] = new_active
         video_mgr.write_frame(cam, disp)
 
     # 3. 종료 처리
     video_mgr.release_all()
-    pd.DataFrame(global_events).to_csv(config.OUT_DIR / "parcel_master_tracking_fifo_with_EOL.csv", index=False)
+    print("Tracking Completed. Logs saved.")
 
 if __name__ == "__main__":
     main()

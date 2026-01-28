@@ -2,7 +2,7 @@ from pathlib import Path
 
 # 경로 설정
 MODEL_PATH = r"C:\Users\User\Desktop\paymentinapp\parcel_ver0123.pt"
-BASE_DIR = Path(r"C:\Users\User\Desktop\paymentinapp\0127Tracking")
+BASE_DIR = Path(r"C:\Users\User\Desktop\paymentinapp\Tracking\0127Tracking")
 OUT_DIR = Path("Parcel_Integration_Log_FIFO")
 VIDEO_DIR = OUT_DIR / "videos"
 
@@ -50,6 +50,6 @@ AVG_TRAVEL = {
 TIME_MARGIN = {
     ('USB_LOCAL', 'RPI_USB1'): 1.0,
     ('RPI_USB1', 'RPI_USB2'): 1.0,
-    ('RPI_USB2', 'RPI_USB3'): 1.0,
+    ('RPI_USB2', 'RPI_USB3'): 1.2,
     ('RPI_USB3', 'RPI_USB3_EOL'): 1.5
 }
