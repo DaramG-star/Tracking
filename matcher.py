@@ -7,63 +7,74 @@ class FIFOGlobalMatcher:
         self.masters = {}
         # 각 구간별 FIFO 큐
         self.queues = {
+            "q_scan": deque(),
             "q01": deque(), "q12": deque(), "q23": deque(), "q3e": deque()
         }
 
     def _get_next_cam(self, route, cam):
         """경로(Route)에 따른 다음 예상 카메라 순서 반환"""
+        # [수정] Scanner를 시작점에 추가해야 resolve_pending이 작동함
         if route == "XSEA":
-            order = ["USB_LOCAL", "RPI_USB1", "RPI_USB2", "RPI_USB3"]
+            order = ["Scanner", "USB_LOCAL", "RPI_USB1", "RPI_USB2", "RPI_USB3"]
         else:  # XSEB
-            order = ["USB_LOCAL", "RPI_USB1", "RPI_USB2", "RPI_USB3", "RPI_USB3_EOL"]
+            order = ["Scanner", "USB_LOCAL", "RPI_USB1", "RPI_USB2", "RPI_USB3", "RPI_USB3_EOL"]
 
         if cam not in order:
             return None
         idx = order.index(cam)
         return order[idx + 1] if idx + 1 < len(order) else None
-
-    def _new_master(self, cam, time_s, width, uid, route_code):
-        """새로운 마스터 객체 생성 및 첫 번째 큐 등록"""
-        mid = uid 
+    
+    def add_scanner_data(self, uid, route_code, time_s):
+        """ScannerListener가 호출하는 함수: 스캐너 데이터를 시스템에 등록"""
+        mid = uid
+        total_dist = config.ROUTE_TOTAL_DIST.get(route_code, 14.08)
+        
         self.masters[mid] = {
-            "last_cam": cam,
+            "last_cam": "Scanner",
             "last_time": time_s,
-            "last_width": width,
-            "uids": {cam: uid},
+            "last_width": 0,
+            "uids": {},
             "route_code": route_code,
-            "status": "TRACKING",        # 상태: TRACKING / PENDING / PICKUP / DISAPPEAR / MISSING
+            "status": "TRACKING",
+            "start_time": None,
+            "total_dist": total_dist,
             "pending_from_cam": None
         }
-        self.queues["q01"].append(mid)
-        return mid
+        # 큐에는 매칭을 위해 (mid, route_code) 튜플 형태로 저장
+        self.queues["q_scan"].append((mid, route_code))
+        print(f"[Matcher] ✅ q_scan 등록 완료: {mid} (Route: {route_code})")
 
     def _try_fifo(self, q_key, prev_cam, cam, time_s, width, uid, next_q_key=None):
-        """FIFO 큐를 이용한 이전 카메라와의 매칭 시도"""
         queue = self.queues[q_key]
         if not queue: return None
 
-        mid = queue[0]
-        info = self.masters[mid]
+        # 큐의 첫 번째 항목 추출 (q_scan은 튜플, 나머지는 문자열)
+        item = queue[0]
+        mid = item[0] if isinstance(item, tuple) else item
         
-        # 예상 도착 시간 계산 및 오차 범위 확인
-        expected = info["last_time"] + config.AVG_TRAVEL.get((prev_cam, cam), 0)
-        margin = config.TIME_MARGIN.get((prev_cam, cam), 1.0)
+        info = self.masters.get(mid)
+        if not info: return None
 
-        # 시간 범위를 벗어나거나 과거 데이터면 매칭 실패
+        # [시간차 매칭] config에 설정된 평균 이동 시간과 마진 적용
+        expected = info["last_time"] + config.AVG_TRAVEL.get((prev_cam, cam), 0)
+        margin = config.TIME_MARGIN.get((prev_cam, cam), 2.0)
+
         if abs(time_s - expected) > margin or time_s <= info["last_time"]:
             return None
 
-        # 매칭 성공: 큐에서 제거하고 정보 업데이트
+        # 매칭 성공 시 처리
         queue.popleft()
         info.update({
-            "last_cam": cam, 
-            "last_time": time_s, 
+            "last_cam": cam,
+            "last_time": time_s,
             "last_width": width,
-            "status": "TRACKING" # 다시 나타났으므로 상태 복구
+            "status": "TRACKING"
         })
         info["uids"][cam] = uid
         
-        # 다음 구간 큐가 있다면 이동
+        if info["start_time"] is None:
+            info["start_time"] = time_s
+
         if next_q_key:
             self.queues[next_q_key].append(mid)
         return mid
@@ -71,10 +82,8 @@ class FIFOGlobalMatcher:
     def try_match(self, cam, time_s, width, uid, scanner_data=None):
         """메인 진입점: 카메라별 매칭 로직 분기"""
         if cam == "USB_LOCAL":
-            u = scanner_data['uid'] if scanner_data else f"TEMP_{self.counter}"
-            r = scanner_data['route_code'] if scanner_data else "XSEB"
-            return self._new_master(cam, time_s, width, u, r)
-        
+            # q_scan에서 매칭 시도
+            return self._try_fifo("q_scan", "Scanner", cam, time_s, width, uid, "q01")
         elif cam == "RPI_USB1":
             return self._try_fifo("q01", "USB_LOCAL", cam, time_s, width, uid, "q12")
         elif cam == "RPI_USB2":
@@ -87,14 +96,16 @@ class FIFOGlobalMatcher:
 
     def resolve_pending(self, mid, now_s):
         """
-        PENDING 상태인 객체가 다음 카메라에 나타날 시간을 넘겼는지 판단하여 결과 반환.
+        PENDING 또는 TRACKING(Scanner 대기) 상태인 객체가 
+        다음 카메라에 나타날 시간을 넘겼는지 판단하여 결과 반환.
         """
         info = self.masters[mid]
-        if info["status"] != "PENDING":
+        
+        if info["status"] not in ["PENDING", "TRACKING"]:
             return None
-
+            
+        from_cam = info.get("pending_from_cam") or info["last_cam"]
         route = info["route_code"]
-        from_cam = info["pending_from_cam"]
         next_cam = self._get_next_cam(route, from_cam)
 
         if not next_cam: return None
@@ -102,40 +113,44 @@ class FIFOGlobalMatcher:
         key = (from_cam, next_cam)
         if key not in config.AVG_TRAVEL: return None
 
-        # 다음 카메라에 나타나야 할 최대 예상 시간
+        # [Jam 방지] 다음 카메라에 나타나야 할 최대 예상 시간 초과 여부 확인
         expected = info["last_time"] + config.AVG_TRAVEL[key] + config.TIME_MARGIN[key]
 
-        # 아직 기다려볼 만한 시간이면 유지
         if now_s < expected:
             return None
 
-        # 시간이 초과됨 -> 경로에 따른 최종 결정 (PICKUP 또는 DISAPPEAR)
+        # 시간 초과 시 결정 로직
         if route == "XSEA":
             decision = "PICKUP" if next_cam in ["RPI_USB2", "RPI_USB3"] else "DISAPPEAR"
         elif route == "XSEB":
             decision = "PICKUP" if next_cam in ["RPI_USB3", "RPI_USB3_EOL"] else "DISAPPEAR"
         else:
-            return None
+            decision = "DISAPPEAR"
 
-        # 상태 업데이트 및 큐 청소
+        # 상태 업데이트 및 큐 청소 (이 단계에서 cancel_pending이 중요함)
         info["status"] = decision
         self.cancel_pending(from_cam, mid)
 
         return {
-            "decision": decision,
-            "from_cam": from_cam,
-            "next_cam": next_cam,
-            "expected": expected
+            "decision": decision, "from_cam": from_cam, "next_cam": next_cam, "expected": expected
         }
 
     def cancel_pending(self, from_cam, mid):
-        """매칭되지 않고 사라진 객체를 큐에서 제거하여 다음 물체 매칭 방해 방지 (Deadlock 방지)"""
+        """매칭되지 않고 사라진 객체를 큐에서 제거 (Deadlock 방지)"""
+        # [수정] 오타 수정: q-scan -> q_scan
         q_map = {
-            "USB_LOCAL": "q01", "RPI_USB1": "q12", "RPI_USB2": "q23", "RPI_USB3": "q3e"
+            "Scanner": "q_scan", "USB_LOCAL": "q01", "RPI_USB1": "q12", 
+            "RPI_USB2": "q23", "RPI_USB3": "q3e"
         }
         q_key = q_map.get(from_cam)
         
-        if q_key and self.queues[q_key] and self.queues[q_key][0] == mid:
-            self.queues[q_key].popleft()
-            return True
+        if q_key and self.queues[q_key]:
+            # [수정] q_scan의 튜플 구조 대응: 첫 번째 요소(mid)와 비교
+            first_item = self.queues[q_key][0]
+            first_mid = first_item[0] if isinstance(first_item, tuple) else first_item
+            
+            if first_mid == mid:
+                self.queues[q_key].popleft()
+                print(f"[Matcher] Jam 방지: {q_key}에서 {mid} 제거완료")
+                return True
         return False
