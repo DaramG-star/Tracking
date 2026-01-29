@@ -63,7 +63,7 @@ TIME_MARGIN = {
     ('RPI_USB3', 'RPI_USB3_EOL'): 1.5
 }
 
-# --- 실시간 거리 추계용 설정 추가 ---
+# 실시간 거리 추계용 설정 
 BELT_SPEED = 0.366  # m/s (벨트 속도)
 
 # 경로별 시작점(USB_LOCAL)부터 최종 목적지까지의 총 거리
@@ -71,3 +71,5 @@ ROUTE_TOTAL_DIST = {
     "XSEA": 9.47,   # RPI_USB2 (분류점 A)
     "XSEB": 14.08   # EOL (최종 배출점 B)
 }
+
+SAVE_VIDEO = False
