@@ -113,7 +113,7 @@ class ScannerListener:
                 print(f"{'='*80}\n")
                 
                 # operationType이 insert인 경우만 처리
-                operation_type = data.get('operationType') if isinstance(data, dict) else None
+                operation_type = data.get('type') if isinstance(data, dict) else None
                 
                 if operation_type == 'insert':
                     print(f"\n[ScannerListener] ✅ operationType='insert' → 처리합니다")
@@ -182,27 +182,34 @@ class ScannerListener:
             print(f"[ScannerListener] 파싱된 메시지:")
             print(json.dumps(message, indent=2, ensure_ascii=False, default=str))
             
-            # MongoDB Change Stream의 fullDocument에서 데이터 추출
-            # Change Stream 형식: { operationType: 'insert', fullDocument: { ... } }
-            full_document = message.get('fullDocument') or message
-            print(f"\n[ScannerListener] fullDocument 추출:")
-            if isinstance(full_document, dict):
-                print(json.dumps(full_document, indent=2, ensure_ascii=False, default=str))
+            # MongoDB Change Stream의 data에서 데이터 추출
+            # Change Stream 형식: { type: 'insert', data: { uid, route_code, timestamp, ... } }
+            data_dict = message.get('data') or message.get('fullDocument') or message
+            print(f"\n[ScannerListener] data 추출:")
+            if isinstance(data_dict, dict):
+                print(json.dumps(data_dict, indent=2, ensure_ascii=False, default=str))
             else:
-                print(full_document)
+                print(f"data_dict: {data_dict}")
             
-            # 필수 필드 확인 (fullDocument 내부 또는 최상위 레벨에서 찾기)
-            uid = (full_document.get('uid') or full_document.get('_id') or 
-                   message.get('uid') or message.get('_id') or message.get('id'))
+            # 필수 필드 확인 (data 내부에서 찾기)
+            if isinstance(data_dict, dict):
+                uid = data_dict.get('uid') or data_dict.get('_id')
+                route_code = data_dict.get('route_code') or data_dict.get('route')
+                timestamp = (data_dict.get('timestamp') or data_dict.get('time') or
+                            data_dict.get('created_at') or data_dict.get('createdAt'))
+            else:
+                uid = None
+                route_code = None
+                timestamp = None
             
-            route_code = (full_document.get('route_code') or full_document.get('route') or
-                         message.get('route_code') or message.get('route'))
-            
-            # 타임스탬프는 fullDocument나 message에서 찾기
-            timestamp = (full_document.get('timestamp') or full_document.get('time') or 
-                        full_document.get('created_at') or full_document.get('createdAt') or
-                        message.get('timestamp') or message.get('time') or 
-                        message.get('created_at') or message.get('createdAt'))
+            # fallback: 최상위 레벨에서 찾기
+            if not uid:
+                uid = message.get('uid') or message.get('_id') or message.get('id')
+            if not route_code:
+                route_code = message.get('route_code') or message.get('route')
+            if not timestamp:
+                timestamp = (message.get('timestamp') or message.get('time') or
+                            message.get('created_at') or message.get('createdAt'))
             
             if not uid or not route_code:
                 print(f"[ScannerListener] 필수 필드 누락 (uid 또는 route_code): {message}")

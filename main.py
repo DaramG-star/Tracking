@@ -23,6 +23,11 @@ def main():
     scanner_listener.start()
     print("[시스템] ScannerListener 시작됨 - MongoDB 데이터를 실시간 대기합니다.")
 
+    print("[시스템] 첫 번째 스캐너 데이터 수신 대기 중...")
+    while len(matcher.queues["q_scan"]) == 0:
+        time.sleep(0.1) 
+    print(f"[시스템] 데이터 수신 확인: {list(matcher.queues['q_scan'])}")
+
     # CSV 및 디버그 파일 설정
     csv_header = ['timestamp', 'cam', 'local_uid', 'master_id', 'route', 'x1', 'y1', 'x2', 'y2', 'event']
     debug_header = ["timestamp", "master_id", "route", "from_cam", "next_cam", "last_seen_time", "expected_time", "now_time", "delay_sec", "decision"]
@@ -132,7 +137,7 @@ def main():
                     })
 
             # 5. [Visualization]
-            visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"])
+            visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"], active_tracks)
             active_tracks[cam] = new_active
 
     # 6. 종료 처리
