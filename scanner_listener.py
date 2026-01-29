@@ -7,6 +7,7 @@ import socketio
 import json
 import threading
 import time
+import re
 from datetime import datetime
 from matcher import FIFOGlobalMatcher
 
@@ -71,7 +72,7 @@ class ScannerListener:
                 print("[ScannerListener] 정상 종료로 인한 연결 끊김")
             else:
                 print("[ScannerListener] ⚠️  예기치 않은 연결 끊김 - 재연결 시도 예정")
-                print("[ScannerListener] 가능한ㄹ 원인: 서버 측 타임아웃, 네트워크 문제, ping 응답 실패")
+                print("[ScannerListener] 가능한 원인: 서버 측 타임아웃, 네트워크 문제, ping 응답 실패")
             if self.first_retry_time is None:
                 self.first_retry_time = time.time()
         
@@ -90,8 +91,8 @@ class ScannerListener:
                     self.sio.disconnect()
                     return
             
-            remaining = self.max_retry_time - elapsed if self.max_retry_time else None
-            if remaining:
+            remaining = self.max_retry_time - (time.time() - self.first_retry_time) if self.max_retry_time else None
+            if remaining and remaining > 0:
                 print(f"[ScannerListener] 연결 오류: {data}, 재시도 중... (남은 시간: {remaining:.0f}초)")
             else:
                 print(f"[ScannerListener] 연결 오류: {data}, 재시도 중...")
@@ -101,26 +102,12 @@ class ScannerListener:
         @self.sio.on('parcelUpdate')
         def on_parcel_update(data):
             try:
-                import json
-                print(f"\n{'='*80}")
-                print(f"[ScannerListener] parcelUpdate 이벤트 수신!")
-                print(f"[ScannerListener] 데이터 타입: {type(data)}")
-                print(f"[ScannerListener] 원본 데이터:")
-                if isinstance(data, dict):
-                    print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
-                else:
-                    print(data)
-                print(f"{'='*80}\n")
-                
                 # operationType이 insert인 경우만 처리
                 operation_type = data.get('type') if isinstance(data, dict) else None
                 
                 if operation_type == 'insert':
                     print(f"\n[ScannerListener] ✅ operationType='insert' → 처리합니다")
-                    print(f"[ScannerListener] 🔄 _handle_message() 호출 직전 - 데이터: {data}")
-                    print(f"[ScannerListener] 🔄 _handle_message() 호출 시작...\n")
                     self._handle_message(data)
-                    print(f"\n[ScannerListener] ✅ _handle_message() 호출 완료\n")
                 else:
                     # insert가 아닌 경우 로그만 출력
                     if operation_type:
@@ -134,26 +121,33 @@ class ScannerListener:
         
     
     def _parse_timestamp(self, ts_str):
-        """타임스탬프 문자열을 초 단위로 변환"""
+        """
+        [수정됨] UID 문자열(예: 20260127_081946_617)에서 시간을 추출하여 
+        영상 시간과 동일한 '하루 중 초' 단위로 변환합니다.
+        """
         try:
-            # 다양한 형식 지원
+            # UID 포맷에서 시간 정보(HHMMSS_mmm) 추출 시도
+            m = re.search(r"(?:\d{8}_)?(\d{6}_\d+)", str(ts_str))
+            if m:
+                ts_part = m.group(1) # '081946_617'
+                h = int(ts_part[0:2])
+                m_val = int(ts_part[2:4])
+                s = int(ts_part[4:6])
+                ms = int(ts_part.split('_')[1]) / 1000
+                
+                # 영상 프레임 시간과 일치하도록 하루 중 총 경과 초로 변환
+                return h * 3600 + m_val * 60 + s + ms
+
+            # 다양한 형식 지원 (Fallback)
             if isinstance(ts_str, (int, float)):
                 return float(ts_str)
             
             if 'T' in str(ts_str):
                 # ISO 형식: "2025-01-28T08:19:52.961"
                 dt = datetime.fromisoformat(str(ts_str).replace('Z', '+00:00'))
-                return dt.timestamp()
-            else:
-                # 간단한 형식: "081952_961" -> 초 변환
-                parts = str(ts_str).split('_')
-                if len(parts) >= 2:
-                    time_str = parts[0]
-                    ms = int(parts[1]) / 1000
-                    h = int(time_str[0:2])
-                    m = int(time_str[2:4])
-                    s = int(time_str[4:6])
-                    return h * 3600 + m * 60 + s + ms
+                # Epoch가 아닌 하루 중 초로 변환하여 일관성 유지
+                return dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1000000
+            
             return time.time()
         except Exception as e:
             print(f"[ScannerListener] 타임스탬프 파싱 오류: {e}, 원본: {ts_str}")
@@ -161,99 +155,48 @@ class ScannerListener:
     
     def _handle_message(self, data):
         """받은 메시지를 처리하여 matcher에 추가"""
-        print(f"\n{'#'*80}")
-        print(f"[ScannerListener] 🚀 _handle_message() 함수 시작!")
-        print(f"[ScannerListener] 받은 데이터 타입: {type(data)}")
-        print(f"[ScannerListener] 받은 데이터: {data}")
-        print(f"{'#'*80}\n")
-        
         try:
-            import json
             # 데이터가 이미 dict인 경우와 JSON 문자열인 경우 모두 처리
             if isinstance(data, str):
                 message = json.loads(data)
             elif isinstance(data, dict):
                 message = data
             else:
-                print(f"[ScannerListener] 알 수 없는 데이터 형식: {type(data)}")
                 return
             
-            print(f"\n[ScannerListener] _handle_message 호출됨")
-            print(f"[ScannerListener] 파싱된 메시지:")
-            print(json.dumps(message, indent=2, ensure_ascii=False, default=str))
-            
             # MongoDB Change Stream의 data에서 데이터 추출
-            # Change Stream 형식: { type: 'insert', data: { uid, route_code, timestamp, ... } }
             data_dict = message.get('data') or message.get('fullDocument') or message
-            print(f"\n[ScannerListener] data 추출:")
-            if isinstance(data_dict, dict):
-                print(json.dumps(data_dict, indent=2, ensure_ascii=False, default=str))
-            else:
-                print(f"data_dict: {data_dict}")
             
             # 필수 필드 확인 (data 내부에서 찾기)
             if isinstance(data_dict, dict):
                 uid = data_dict.get('uid') or data_dict.get('_id')
                 route_code = data_dict.get('route_code') or data_dict.get('route')
-                timestamp = (data_dict.get('timestamp') or data_dict.get('time') or
-                            data_dict.get('created_at') or data_dict.get('createdAt'))
             else:
                 uid = None
                 route_code = None
-                timestamp = None
             
             # fallback: 최상위 레벨에서 찾기
             if not uid:
                 uid = message.get('uid') or message.get('_id') or message.get('id')
             if not route_code:
                 route_code = message.get('route_code') or message.get('route')
-            if not timestamp:
-                timestamp = (message.get('timestamp') or message.get('time') or
-                            message.get('created_at') or message.get('createdAt'))
             
             if not uid or not route_code:
                 print(f"[ScannerListener] 필수 필드 누락 (uid 또는 route_code): {message}")
                 return
             
-            # 타임스탬프 변환 (없으면 현재 시간 사용)
-            if timestamp:
-                time_s = self._parse_timestamp(timestamp)
-            else:
-                time_s = time.time()
-                print(f"[ScannerListener] 타임스탬프 없음, 현재 시간 사용: {time_s}")
+            # [수정됨] 외부 DB의 timestamp 필드 대신 UID 자체에서 영상 기준 시간을 계산
+            time_s = self._parse_timestamp(uid)
             
             # matcher에 추가
-            print(f"\n{'='*80}")
-            print(f"[ScannerListener] ⚡ add_scanner_data() 호출 직전")
-            print(f"  - uid: {uid}")
-            print(f"  - route_code: {route_code}")
-            print(f"  - time_s: {time_s}")
-            print(f"{'='*80}\n")
-            
             self.matcher.add_scanner_data(uid, route_code, time_s)
             
-            # q_scan 상태 출력 (반드시 실행되도록)
-            q_scan = self.matcher.queues["q_scan"]
-            print(f"\n{'='*80}")
-            print(f"[ScannerListener] 📦 q_scan 상태 (ChangeStream 수신 후):")
-            print(f"  - q_scan 크기: {len(q_scan)}개")
-            print(f"  - q_scan 내용: {list(q_scan)}")
-            print(f"  - q_scan 타입: {type(q_scan)}")
-            print(f"[ScannerListener] 스캐너 데이터 처리 완료: uid={uid}, route={route_code}, time={time_s}")
-            print(f"{'='*80}\n")
+            print(f"[ScannerListener] 📦 q_scan 등록 완료: uid={uid}, route={route_code}, time={time_s}")
             
-        except json.JSONDecodeError as e:
-            print(f"\n[ScannerListener] ❌ JSON 파싱 오류: {e}")
-            print(f"[ScannerListener] 데이터: {data}")
-            import traceback
-            traceback.print_exc()
         except Exception as e:
             print(f"\n[ScannerListener] ❌ 메시지 처리 오류: {e}")
-            print(f"[ScannerListener] 데이터: {data}")
             import traceback
             traceback.print_exc()
-        finally:
-            print(f"[ScannerListener] _handle_message() 함수 종료\n")
     
     def _connect_loop(self):
         """연결 루프"""
@@ -275,42 +218,21 @@ class ScannerListener:
                     
                     print(f"[ScannerListener] Socket.io 서버 연결 시도: {url}")
                     try:
-                        # socketio_path와 transports는 connect() 메서드에 전달
                         self.sio.connect(
                             url,
                             wait_timeout=10,
-                            socketio_path="/socket.io",  # FastAPI에서 사용하는 기본 path
+                            socketio_path="/socket.io",
                             transports=["websocket", "polling"]
                         )
                         
-                        # 연결 성공 확인
                         if self.sio.connected:
-                            print(f"[ScannerListener] ✅ 연결 성공! connected={self.sio.connected}, sid={self.sio.sid}")
-                        else:
-                            print(f"[ScannerListener] ⚠️  연결 시도했지만 connected=False 상태입니다.")
-                            time.sleep(self.retry_interval)
-                            continue
-                            
-                    except socketio.exceptions.ConnectionError as e:
-                        print(f"[ScannerListener] ❌ 연결 오류 (ConnectionError): {e}")
-                        remaining = self.max_retry_time - (time.time() - self.first_retry_time) if self.max_retry_time else None
-                        if remaining:
-                            print(f"[ScannerListener] {self.retry_interval}초 후 재시도... (남은 시간: {remaining:.0f}초)")
-                        else:
-                            print(f"[ScannerListener] {self.retry_interval}초 후 재시도...")
-                        time.sleep(self.retry_interval)
+                            print(f"[ScannerListener] ✅ 연결 성공! sid={self.sio.sid}")
+                            self.first_retry_time = None
+                        
                     except Exception as e:
-                        import traceback
-                        print(f"[ScannerListener] ❌ 연결 예외 발생:")
-                        traceback.print_exc()
-                        remaining = self.max_retry_time - (time.time() - self.first_retry_time) if self.max_retry_time else None
-                        if remaining:
-                            print(f"[ScannerListener] 연결 실패: {e}, {self.retry_interval}초 후 재시도... (남은 시간: {remaining:.0f}초)")
-                        else:
-                            print(f"[ScannerListener] 연결 실패: {e}, {self.retry_interval}초 후 재시도...")
+                        print(f"[ScannerListener] 연결 실패: {e}, {self.retry_interval}초 후 재시도...")
                         time.sleep(self.retry_interval)
                 else:
-                    # 연결되어 있으면 대기
                     time.sleep(1)
                     
             except Exception as e:
@@ -320,7 +242,6 @@ class ScannerListener:
     def start(self):
         """리스너 시작"""
         if self.running:
-            print("[ScannerListener] 이미 실행 중입니다.")
             return
         
         self.running = True
@@ -330,13 +251,12 @@ class ScannerListener:
     
     def stop(self):
         """리스너 중지"""
-        print("[ScannerListener] 리스너 중지 요청됨...")
         self.running = False
         if self.sio.connected:
             try:
                 self.sio.disconnect()
-            except Exception as e:
-                print(f"[ScannerListener] 연결 종료 중 오류 (무시 가능): {e}")
+            except Exception:
+                pass
         if self.thread:
             self.thread.join(timeout=2)
         print("[ScannerListener] Socket.io 리스너 중지 완료")
