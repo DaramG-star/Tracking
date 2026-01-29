@@ -13,12 +13,13 @@ LOG_CSV = OUT_DIR / "tracking_logs.csv" # 전체 트래킹 히스토리 저장 �
 
 # 2. 카메라별 물리적 파라미터 및 ROI
 CAM_SETTINGS = {
+    "Scanner": {"dist": -2.3},
     "USB_LOCAL": {
         "path": BASE_DIR / "usb_usb_local" / "images",
         "roi_y": 750, "roi_margin": 100,
         "dist_eps": 60, "max_dy": 120,
         "forward_sign": -1,
-        "dist": 0.0,  # 시작 지점 (스캐너)
+        "dist": 0.0,  
         "parts": [("081952_961", "082029_085")]
     },
     "RPI_USB1": {
@@ -26,7 +27,7 @@ CAM_SETTINGS = {
         "roi_y": 400, "roi_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": 1,
-        "dist": 5.88,  # 시작점에서 5.88m 지점
+        "dist": 5.88,  
         "parts": [("082008_660", "082046_675")]
     },
     "RPI_USB2": {
@@ -34,7 +35,7 @@ CAM_SETTINGS = {
         "roi_y": 160, "roi_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": -1,
-        "dist": 9.47,  # 시작점에서 9.47m 지점 (분류점 A) [쉼표(,)를 점(.)으로 수정]
+        "dist": 9.47,  
         "parts": [("082018_216", "082054_026")]
     },
     "RPI_USB3": {
@@ -43,7 +44,7 @@ CAM_SETTINGS = {
         "eol_y": 690, "eol_margin": 30,
         "dist_eps": 35, "max_dy": 80,
         "forward_sign": 1,
-        "dist": 12.8,  # 시작점에서 12.8m 지점 (분류점 B)
+        "dist": 12.8,  
         "parts": [("082028_591", "082107_610")]
     }
 }
