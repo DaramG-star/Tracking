@@ -29,6 +29,13 @@ def main():
     m_debug_writer = csv.DictWriter(m_debug_f, fieldnames=match_debug_header)
     m_debug_writer.writeheader()
 
+    # --- [신규 추가] 거리 로그용 CSV 설정 ---
+    dist_log_header = ["timestamp", "master_id", "route", "status", "rem_dist_m", "stepped_dist_m"]
+    dist_f = open(config.OUT_DIR / "distance_logs.csv", "w", newline="", encoding="utf-8")
+    dist_writer = csv.DictWriter(dist_f, fieldnames=dist_log_header)
+    dist_writer.writeheader()
+    # ---------------------------------------
+
     print("[시스템] 첫 번째 스캐너 데이터 수신 대기 중...")
     while len(matcher.queues["q_scan"]) == 0:
         time.sleep(0.1) 
@@ -93,7 +100,6 @@ def main():
                     # 매칭 시도
                     mid = matcher.try_match(match_cam, frame["time_s"], det["width"], best_uid)
 
-                    # [디버그 매칭 결과 기록]
                     if hasattr(matcher, 'last_match_attempt') and matcher.last_match_attempt:
                         attempt = matcher.last_match_attempt
                         m_debug_writer.writerow({
@@ -116,15 +122,13 @@ def main():
                             event_type = "MISSING"
                         else:
                             matcher.masters[mid]["status"] = "TRACKING"
-                            # 고정 위치 전송 대신 실시간 계산 로직(아래 4.5)에서 통합 관리
-                            # api_helper.api_update_position(mid, cfg["dist"])
                             event_type = "MATCHED"
 
                 writer.writerow({'timestamp': frame['ts'], 'cam': cam, 'local_uid': best_uid, 'master_id': mid, 'route': route, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'event': event_type})
                 if event_type != "MISSING":
                     new_active[best_uid] = {"last_pos": (cx, cy), "master_id": mid}
 
-            # 3. [Pending Logic] 화면에서 사라진 물체 상태 변경
+            # 3. [Pending Logic]
             for old_uid, old_info in active_tracks[cam].items():
                 if old_uid not in new_active:
                     mid = old_info["master_id"]
@@ -132,7 +136,7 @@ def main():
                         matcher.masters[mid]["status"] = "PENDING"
                         matcher.masters[mid]["pending_from_cam"] = cam
 
-            # 4. [Resolve Pending & Jam 방지]
+            # 4. [Resolve Pending]
             for mid in list(matcher.masters.keys()):
                 result = matcher.resolve_pending(mid, frame["time_s"])
                 if result:
@@ -140,40 +144,41 @@ def main():
                     if decision == "PICKUP":
                         api_helper.api_pickup(mid)
                         writer.writerow({'timestamp': frame['ts'], 'cam': result["from_cam"], 'local_uid': "", 'master_id': mid, 'route': matcher.masters[mid]["route_code"], 'event': "PICKUP"})
-                    elif decision == "DISAPPEAR":
-                        print(f"[시스템] 객체 {mid} 유실(DISAPPEAR) 처리됨.")
-
+                    
                     debug_writer.writerow({
                         "timestamp": frame["ts"], "master_id": mid, "route": matcher.masters[mid]["route_code"],
                         "from_cam": result["from_cam"], "next_cam": result["next_cam"],
                         "last_seen_time": matcher.masters[mid]["last_time"], "expected_time": round(result["expected"], 3),
-                        "now_time": round(frame["time_s"], 3), "delay_sec": round(frame["time_s"] - result["expected"], 3),
-                        "decision": decision
+                        "now_time": round(frame["time_s"], 3), "decision": decision
                     })
 
-            # 4.5 [실시간 거리 추계 및 API 전송]
-            # 카메라 ROI 외부(PENDING) 포함, 실시간으로 목적지까지 남은 거리를 계산합니다.
+            # 4.5 [실시간 거리 추계 및 CSV 기록]
             for mid, m_info in matcher.masters.items():
                 if m_info["status"] in ["TRACKING", "PENDING"] and m_info.get("start_time") is not None:
-                    # 노선별 총 목적지 거리 (XSEA: 9.5m, XSEB: 12.8m)
-                    total_dist = 9.5 if m_info["route_code"] == "XSEA" else 12.8
+                    # 목적지 거리 설정 (XSEA: 9.47m, XSEB: 12.8m)
+                    total_dist = 9.47 if m_info["route_code"] == "XSEA" else 12.8
                     
-                    # USB_LOCAL 매칭 시점으로부터 경과 시간 및 이동 거리 계산
+                    # 이동 거리 및 남은 거리 계산
                     elapsed_time = frame["time_s"] - m_info["start_time"]
-                    moved_dist = elapsed_time * config.BELT_SPEED # 0.366 m/s
+                    rem_dist = max(0.0, total_dist - (elapsed_time * config.BELT_SPEED))
                     
-                    # 남은 거리 (0m 이하 방지)
-                    remaining_dist = max(0.0, total_dist - moved_dist)
+                    # 0.5m 단위 절삭
+                    step_dist = round(rem_dist / 0.5) * 0.5
                     
-                    # 0.5m 단위로 양자화 (Stepping)
-                    step = 0.5
-                    stepped_dist = round(remaining_dist / step) * step
+                    # [로그 기록] 매 프레임의 세부 거리 정보를 CSV에 씁니다.
+                    dist_writer.writerow({
+                        "timestamp": frame["ts"],
+                        "master_id": mid,
+                        "route": m_info["route_code"],
+                        "status": m_info["status"],
+                        "rem_dist_m": round(rem_dist, 3),
+                        "stepped_dist_m": step_dist
+                    })
                     
-                    # 값이 변했을 때만 API 호출하여 중복 전송 방지
-                    if m_info.get("last_sent_dist") != stepped_dist:
-                        api_helper.api_update_position(mid, stepped_dist)
-                        m_info["last_sent_dist"] = stepped_dist
-                        # print(f"[거리 갱신] {mid} ({m_info['route_code']}): 남은 거리 {stepped_dist}m")
+                    # 단계가 변할 때만 API 호출
+                    if m_info.get("last_sent_dist") != step_dist:
+                        api_helper.api_update_position(mid, step_dist)
+                        m_info["last_sent_dist"] = step_dist
 
             # 5. [Visualization]
             visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"], active_tracks)
@@ -182,16 +187,14 @@ def main():
     # 6. 종료 처리
     m_debug_f.close()
     debug_f.close()
+    dist_f.close() # 거리 로그 파일 닫기
     visualizer.release_all()
     
-    print("[시스템] 프레임 처리 완료.")
+    print(f"[시스템] 처리 완료. 거리 로그: {config.OUT_DIR}/distance_logs.csv")
     try:
-        while scanner_listener.running:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[시스템] 종료 중...")
-    finally:
-        scanner_listener.stop()
+        while scanner_listener.running: time.sleep(1)
+    except KeyboardInterrupt: pass
+    finally: scanner_listener.stop()
 
 if __name__ == "__main__":
     main()
