@@ -1,13 +1,14 @@
 from collections import deque
+import heapq
 import config
 
 class FIFOGlobalMatcher:
     def __init__(self):
         self.counter = 0
         self.masters = {}
-        # 각 구간별 FIFO 큐
+        # q_scan: uid 오름차순 힙큐 (uid, route_code), 나머지는 FIFO deque
         self.queues = {
-            "q_scan": deque(),
+            "q_scan": [],  # heapq용 list (uid 기준 오름차순)
             "q01": deque(), "q12": deque(), "q23": deque(), "q3e": deque()
         }
 
@@ -40,20 +41,28 @@ class FIFOGlobalMatcher:
             "total_dist": total_dist,
             "pending_from_cam": None
         }
-        # 큐에는 매칭을 위해 (mid, route_code) 튜플 형태로 저장
-        self.queues["q_scan"].append((mid, route_code))
+        # q_scan: (uid, route_code)를 uid 오름차순 힙에 추가
+        heapq.heappush(self.queues["q_scan"], (mid, route_code))
         print(f"[Matcher] ✅ q_scan 등록 완료: {mid} (Route: {route_code})")
 
     def _try_fifo(self, q_key, prev_cam, cam, time_s, width, uid, next_q_key=None):
+        is_q_scan = q_key == "q_scan"
         queue = self.queues[q_key]
-        if not queue: return None
 
-        # 큐의 첫 번째 항목 추출 (q_scan은 튜플, 나머지는 문자열)
-        item = queue[0]
-        mid = item[0] if isinstance(item, tuple) else item
-        
+        if is_q_scan:
+            if not queue:
+                return None
+            item = queue[0]  # 힙 최소 요소(uid 오름차순)
+            mid = item[0]
+        else:
+            if not queue:
+                return None
+            item = queue[0]
+            mid = item[0] if isinstance(item, tuple) else item
+
         info = self.masters.get(mid)
-        if not info: return None
+        if not info:
+            return None
 
         # [시간차 매칭] config에 설정된 평균 이동 시간과 마진 적용
         expected = info["last_time"] + config.AVG_TRAVEL.get((prev_cam, cam), 0)
@@ -62,8 +71,12 @@ class FIFOGlobalMatcher:
         if abs(time_s - expected) > margin or time_s <= info["last_time"]:
             return None
 
-        # 매칭 성공 시 처리
-        queue.popleft()
+        # 매칭 성공 시 처리: q_scan은 heappop, 나머지는 popleft
+        if is_q_scan:
+            heapq.heappop(self.queues[q_key])
+        else:
+            queue.popleft()
+
         info.update({
             "last_cam": cam,
             "last_time": time_s,
@@ -71,7 +84,7 @@ class FIFOGlobalMatcher:
             "status": "TRACKING"
         })
         info["uids"][cam] = uid
-        
+
         if info["start_time"] is None:
             info["start_time"] = time_s
 
@@ -145,12 +158,14 @@ class FIFOGlobalMatcher:
         q_key = q_map.get(from_cam)
         
         if q_key and self.queues[q_key]:
-            # [수정] q_scan의 튜플 구조 대응: 첫 번째 요소(mid)와 비교
             first_item = self.queues[q_key][0]
             first_mid = first_item[0] if isinstance(first_item, tuple) else first_item
-            
+
             if first_mid == mid:
-                self.queues[q_key].popleft()
+                if q_key == "q_scan":
+                    heapq.heappop(self.queues[q_key])
+                else:
+                    self.queues[q_key].popleft()
                 print(f"[Matcher] Jam 방지: {q_key}에서 {mid} 제거완료")
                 return True
         return False
