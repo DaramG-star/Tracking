@@ -137,7 +137,7 @@ def main():
                     })
 
             # 5. [Visualization]
-            visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"])
+            visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"], active_tracks)
             active_tracks[cam] = new_active
 
     # 6. 종료 처리
