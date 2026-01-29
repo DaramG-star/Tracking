@@ -1,3 +1,0 @@
-timestamp,master_id,route,from_cam,next_cam,last_seen_time,expected_time,now_time,delay_sec,decision
-082008_660,20260127_082000_766,XSEB,Scanner,USB_LOCAL,30000.766,30008.266,30008.66,0.394,DISAPPEAR
-082022_336,20260127_082014_621,XSEB,Scanner,USB_LOCAL,30014.621,30022.121,30022.336,0.215,DISAPPEAR

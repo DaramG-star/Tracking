@@ -116,7 +116,8 @@ def main():
                             event_type = "MISSING"
                         else:
                             matcher.masters[mid]["status"] = "TRACKING"
-                            api_helper.api_update_position(mid, cfg["dist"])
+                            # 고정 위치 전송 대신 실시간 계산 로직(아래 4.5)에서 통합 관리
+                            # api_helper.api_update_position(mid, cfg["dist"])
                             event_type = "MATCHED"
 
                 writer.writerow({'timestamp': frame['ts'], 'cam': cam, 'local_uid': best_uid, 'master_id': mid, 'route': route, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'event': event_type})
@@ -149,6 +150,30 @@ def main():
                         "now_time": round(frame["time_s"], 3), "delay_sec": round(frame["time_s"] - result["expected"], 3),
                         "decision": decision
                     })
+
+            # 4.5 [실시간 거리 추계 및 API 전송]
+            # 카메라 ROI 외부(PENDING) 포함, 실시간으로 목적지까지 남은 거리를 계산합니다.
+            for mid, m_info in matcher.masters.items():
+                if m_info["status"] in ["TRACKING", "PENDING"] and m_info.get("start_time") is not None:
+                    # 노선별 총 목적지 거리 (XSEA: 9.5m, XSEB: 12.8m)
+                    total_dist = 9.5 if m_info["route_code"] == "XSEA" else 12.8
+                    
+                    # USB_LOCAL 매칭 시점으로부터 경과 시간 및 이동 거리 계산
+                    elapsed_time = frame["time_s"] - m_info["start_time"]
+                    moved_dist = elapsed_time * config.BELT_SPEED # 0.366 m/s
+                    
+                    # 남은 거리 (0m 이하 방지)
+                    remaining_dist = max(0.0, total_dist - moved_dist)
+                    
+                    # 0.5m 단위로 양자화 (Stepping)
+                    step = 0.5
+                    stepped_dist = round(remaining_dist / step) * step
+                    
+                    # 값이 변했을 때만 API 호출하여 중복 전송 방지
+                    if m_info.get("last_sent_dist") != stepped_dist:
+                        api_helper.api_update_position(mid, stepped_dist)
+                        m_info["last_sent_dist"] = stepped_dist
+                        # print(f"[거리 갱신] {mid} ({m_info['route_code']}): 남은 거리 {stepped_dist}m")
 
             # 5. [Visualization]
             visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"], active_tracks)
