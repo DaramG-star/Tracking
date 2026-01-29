@@ -2,12 +2,12 @@ import cv2
 import csv
 import config
 import api_helper
-import time  # 추가
+import time
 from matcher import FIFOGlobalMatcher
 from loader import get_sorted_frames
 from detector import YOLODetector
 from visualizer import TrackingVisualizer
-from scanner_listener import ScannerListener  # 추가
+from scanner_listener import ScannerListener
 
 def main():
     # 1. 초기화 및 폴더 준비
@@ -18,12 +18,12 @@ def main():
     matcher = FIFOGlobalMatcher()
     visualizer = TrackingVisualizer()
 
-    # [추가] ScannerListener 시작 (멀티스레드로 백그라운드에서 q_scan 채움)
+    # ScannerListener 시작
     scanner_listener = ScannerListener(matcher, host="192.168.1.200", port=3000)
     scanner_listener.start()
     print("[시스템] ScannerListener 시작됨 - MongoDB 데이터를 실시간 대기합니다.")
 
-    # CSV 헤더 설정
+    # CSV 및 디버그 파일 설정
     csv_header = ['timestamp', 'cam', 'local_uid', 'master_id', 'route', 'x1', 'y1', 'x2', 'y2', 'event']
     debug_header = ["timestamp", "master_id", "route", "from_cam", "next_cam", "last_seen_time", "expected_time", "now_time", "delay_sec", "decision"]
     
@@ -79,7 +79,7 @@ def main():
                     best_uid = f"{cam}_{local_uid_counter[cam]:03d}"
                     match_cam = "RPI_USB3_EOL" if det.get("in_eol") else cam
 
-                    # 이제 ScannerListener가 q_scan에 데이터를 넣어두었으므로 try_match 내부에서 매칭됨
+                    # Scanner -> USB_LOCAL 매칭 포함
                     mid = matcher.try_match(match_cam, frame["time_s"], det["width"], best_uid)
 
                     if mid and mid in matcher.masters:
@@ -96,12 +96,11 @@ def main():
                             api_helper.api_update_position(mid, cfg["dist"])
                             event_type = "MATCHED"
 
-                # 결과 기록
                 writer.writerow({'timestamp': frame['ts'], 'cam': cam, 'local_uid': best_uid, 'master_id': mid, 'route': route, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'event': event_type})
                 if event_type != "MISSING":
                     new_active[best_uid] = {"last_pos": (cx, cy), "master_id": mid}
 
-            # 3. [Pending Logic]
+            # 3. [Pending Logic] 화면에서 사라진 물체 상태 변경
             for old_uid, old_info in active_tracks[cam].items():
                 if old_uid not in new_active:
                     mid = old_info["master_id"]
@@ -109,17 +108,20 @@ def main():
                         matcher.masters[mid]["status"] = "PENDING"
                         matcher.masters[mid]["pending_from_cam"] = cam
 
-            # 4. [Resolve Pending]
+            # 4. [Resolve Pending & Jam 방지]
+            # 스캐너에서 넘어오지 못한 물체나 화면에서 사라진 물체 타임아웃 처리
             for mid in list(matcher.masters.keys()):
                 result = matcher.resolve_pending(mid, frame["time_s"])
                 if result:
-                    # cancel_pending 호출 (FIFO Deadlock 방지)
-                    matcher.cancel_pending(result["from_cam"], mid)
-                    
+                    # resolve_pending 내부에서 이미 상태 변경 및 cancel_pending 완료됨
                     decision = result["decision"]
+                    
                     if decision == "PICKUP":
                         api_helper.api_pickup(mid)
                         writer.writerow({'timestamp': frame['ts'], 'cam': result["from_cam"], 'local_uid': "", 'master_id': mid, 'route': matcher.masters[mid]["route_code"], 'event': "PICKUP"})
+                    elif decision == "DISAPPEAR":
+                        # 스캐너에서 USB_LOCAL로 오지 못한 경우 등에 대한 로그 기록
+                        print(f"[시스템] 객체 {mid} 유실(DISAPPEAR) 처리됨. (Cam: {result['from_cam']} -> {result['next_cam']})")
 
                     debug_writer.writerow({
                         "timestamp": frame["ts"], "master_id": mid, "route": matcher.masters[mid]["route_code"],
@@ -137,7 +139,6 @@ def main():
     debug_f.close()
     visualizer.release_all()
     
-    # [추가] 종료 루프
     print("[시스템] 프레임 처리 완료. 리스너 종료를 위해 Ctrl+C를 누르세요.")
     try:
         while scanner_listener.running:

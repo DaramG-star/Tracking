@@ -50,6 +50,7 @@ CAM_SETTINGS = {
 
 # 3. 이동 시간 및 허용 오차 (FIFO 매칭용)
 AVG_TRAVEL = {
+    ('Scanner', 'USB_LOCAL'): 6.5,
     ('USB_LOCAL', 'RPI_USB1'): 16.06,
     ('RPI_USB1', 'RPI_USB2'): 9.8,
     ('RPI_USB2', 'RPI_USB3'): 9.1,
@@ -57,6 +58,7 @@ AVG_TRAVEL = {
 }
 
 TIME_MARGIN = {
+    ('Scanner', 'USB_LOCAL'): 1.0,
     ('USB_LOCAL', 'RPI_USB1'): 1.0,
     ('RPI_USB1', 'RPI_USB2'): 1.0,
     ('RPI_USB2', 'RPI_USB3'): 1.2,
