@@ -2,10 +2,12 @@ import cv2
 import csv
 import config
 import api_helper
+import time  # 추가
 from matcher import FIFOGlobalMatcher
 from loader import get_sorted_frames
 from detector import YOLODetector
-from visualizer import TrackingVisualizer  # 시각화 도구 불러오기
+from visualizer import TrackingVisualizer
+from scanner_listener import ScannerListener  # 추가
 
 def main():
     # 1. 초기화 및 폴더 준비
@@ -14,9 +16,14 @@ def main():
     
     detector = YOLODetector(config.MODEL_PATH)
     matcher = FIFOGlobalMatcher()
-    visualizer = TrackingVisualizer() # 비디오 제작 및 그리기 전담
+    visualizer = TrackingVisualizer()
 
-    # CSV 헤더 및 파일 오픈
+    # [추가] ScannerListener 시작 (멀티스레드로 백그라운드에서 q_scan 채움)
+    scanner_listener = ScannerListener(matcher, host="192.168.1.200", port=3000)
+    scanner_listener.start()
+    print("[시스템] ScannerListener 시작됨 - MongoDB 데이터를 실시간 대기합니다.")
+
+    # CSV 헤더 설정
     csv_header = ['timestamp', 'cam', 'local_uid', 'master_id', 'route', 'x1', 'y1', 'x2', 'y2', 'event']
     debug_header = ["timestamp", "master_id", "route", "from_cam", "next_cam", "last_seen_time", "expected_time", "now_time", "delay_sec", "decision"]
     
@@ -39,15 +46,12 @@ def main():
             img = cv2.imread(str(frame["path"]))
             if img is None: continue
 
-            # ---------------- [Detection] ----------------
-            # detector.py를 사용하여 영역 필터링까지 한 번에 수행
             detections = detector.get_detections(img, cfg, cam)
             new_active = {}
 
             for det in detections:
                 x1, y1, x2, y2 = det["box"]
                 cx, cy = det["center"]
-                in_eol = det["in_eol"]
 
                 # ---------------- [Local Tracking] ----------------
                 best_uid, best_score = None, 1e9
@@ -70,18 +74,18 @@ def main():
                         if matcher.masters[mid]["status"] == "MISSING": continue
                         event_type = "TRACKING"
                 else:
+                    # 신규 객체 발견 시
                     local_uid_counter[cam] += 1
                     best_uid = f"{cam}_{local_uid_counter[cam]:03d}"
-                    match_cam = "RPI_USB3_EOL" if in_eol else cam
+                    match_cam = "RPI_USB3_EOL" if det.get("in_eol") else cam
 
-                    s_data = {"uid": f"PKG_{frame['ts']}", "route_code": "XSEA"} if cam == "USB_LOCAL" else None
-                    if s_data: api_helper.api_scan(s_data["uid"], s_data["route_code"])
-
-                    mid = matcher.try_match(match_cam, frame["time_s"], det["width"], best_uid, s_data)
+                    # 이제 ScannerListener가 q_scan에 데이터를 넣어두었으므로 try_match 내부에서 매칭됨
+                    mid = matcher.try_match(match_cam, frame["time_s"], det["width"], best_uid)
 
                     if mid and mid in matcher.masters:
                         route = matcher.masters[mid]["route_code"]
-                        # Missing 판정 및 중복 방지
+                        
+                        # Missing/Matched 판정
                         if (route == "XSEA" and cam == "RPI_USB3") or (route == "XSEB" and match_cam == "RPI_USB3_EOL"):
                             if matcher.masters[mid]["status"] != "MISSING":
                                 matcher.masters[mid]["status"] = "MISSING"
@@ -97,7 +101,7 @@ def main():
                 if event_type != "MISSING":
                     new_active[best_uid] = {"last_pos": (cx, cy), "master_id": mid}
 
-            # 3. [Pending Logic] disappearance → PENDING
+            # 3. [Pending Logic]
             for old_uid, old_info in active_tracks[cam].items():
                 if old_uid not in new_active:
                     mid = old_info["master_id"]
@@ -109,6 +113,9 @@ def main():
             for mid in list(matcher.masters.keys()):
                 result = matcher.resolve_pending(mid, frame["time_s"])
                 if result:
+                    # cancel_pending 호출 (FIFO Deadlock 방지)
+                    matcher.cancel_pending(result["from_cam"], mid)
+                    
                     decision = result["decision"]
                     if decision == "PICKUP":
                         api_helper.api_pickup(mid)
@@ -122,13 +129,23 @@ def main():
                         "decision": decision
                     })
 
-            # 5. [Visualization] 비디오 그리기 및 저장 호출
+            # 5. [Visualization]
             visualizer.draw_and_write(cam, img, detections, matcher.masters, frame["ts"])
             active_tracks[cam] = new_active
 
     # 6. 종료 처리
     debug_f.close()
     visualizer.release_all()
+    
+    # [추가] 종료 루프
+    print("[시스템] 프레임 처리 완료. 리스너 종료를 위해 Ctrl+C를 누르세요.")
+    try:
+        while scanner_listener.running:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[시스템] 종료 중...")
+    finally:
+        scanner_listener.stop()
 
 if __name__ == "__main__":
     main()
