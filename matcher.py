@@ -38,13 +38,13 @@ class FIFOGlobalMatcher:
             "uids": {},
             "route_code": route_code,
             "status": "TRACKING",
-            "start_time": None,
+            "start_time": time_s,
             "total_dist": total_dist,
             "pending_from_cam": None
         }
         # q_scan: (uid, route_code)를 uid 오름차순 힙에 추가
         heapq.heappush(self.queues["q_scan"], (mid, route_code))
-        print(f"[Matcher] ✅ q_scan 등록 완료: {mid} (Route: {route_code})")
+        print(f"[Matcher] ✅ q_scan 등록 완료: {mid} (Route: {route_code}, Dist:{total_dist}m)")
 
     def _try_fifo(self, q_key, prev_cam, cam, time_s, width, uid, next_q_key=None):
         is_q_scan = q_key == "q_scan"

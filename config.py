@@ -1,8 +1,8 @@
 from pathlib import Path
 
 # 1. 기본 경로 설정 
-MODEL_PATH = r"/home/piapp/apsr/trackingLogic/Tracking/parcel_ver0123.pt"
-BASE_DIR = Path(r"/home/piapp/apsr/trackingLogic/Tracking/0127Tracking")
+MODEL_PATH = r"/home/piapp/apsr/trackingLogic/Tracking_test1/parcel_ver0123.pt"
+BASE_DIR = Path(r"/home/piapp/apsr/trackingLogic/Tracking_test1/0127Tracking")
 OUT_DIR = Path("Parcel_Integration_Log_FIFO")
 VIDEO_DIR = OUT_DIR / "videos"
 CROP_DIR = OUT_DIR / "crops"           # 탐지된 객체 이미지 저장 폴더
@@ -57,7 +57,7 @@ AVG_TRAVEL = {
 }
 
 TIME_MARGIN = {
-    ('Scanner', 'USB_LOCAL'): 1.0,
+    ('Scanner', 'USB_LOCAL'): 3.0,
     ('USB_LOCAL', 'RPI_USB1'): 1.0,
     ('RPI_USB1', 'RPI_USB2'): 1.0,
     ('RPI_USB2', 'RPI_USB3'): 1.2,
@@ -69,8 +69,8 @@ BELT_SPEED = 0.366  # m/s (벨트 속도)
 
 # 경로별 시작점(USB_LOCAL)부터 최종 목적지까지의 총 거리
 ROUTE_TOTAL_DIST = {
-    "XSEA": 9.47,   
-    "XSEB": 12.8   
+    "XSEA": 11.77,   
+    "XSEB": 15.1   
 }
 
 SAVE_VIDEO = False
