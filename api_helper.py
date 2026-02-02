@@ -14,12 +14,13 @@ def api_scan(uid, route_code):
         print(f"API Error (Scan): {e}")
 
 def api_update_position(uid, pos):
-    """PATCH /api/detect-position: 실시간 남은 거리 전송"""  
+    """PATCH /api/detect-position: 100 서버 스펙 — uid, position 만 전송 (thumbnail 파라미터 없음)."""
     try:
+        payload = {"uid": uid, "position": pos}
         requests.patch(
-            f"{BASE_URL}/detect-position", 
-            json={"uid": uid, "position": pos}, 
-            timeout=2
+            f"{BASE_URL}/detect-position",
+            json=payload,
+            timeout=2,
         )
     except Exception as e:
         print(f"API Error (Position Update): {e}")
@@ -51,3 +52,16 @@ def api_eol(uid):
 def get_missing_api_count():
     """detect-missing API 호출 총 횟수 반환"""
     return _missing_api_count
+
+def api_disappear(uid):
+    """PATCH /api/detect-disappear: 분실/사라짐 처리"""
+    try:
+        # 백엔드 라우터 경로가 /detect-disappear 이므로 이에 맞춰 호출합니다.
+        requests.patch(
+            f"{BASE_URL}/detect-disappear", 
+            json={"uid": uid, "disappear": True}, 
+            timeout=2
+        )
+        print(f"[API 호출] detect-disappear: uid={uid}")
+    except Exception as e:
+        print(f"API Error (Disappear): {e}")
