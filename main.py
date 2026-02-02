@@ -147,6 +147,8 @@ def main():
                     elif decision == "DISAPPEAR":
                         api_helper.api_disappear(mid)
                         writer.writerow({'timestamp': frame['ts'], 'local_uid': "", 'master_id': mid, 'route': matcher.masters[mid]["route_code"], 'event': "DISAPPEAR"})
+
+
                     debug_writer.writerow({
                         "timestamp": frame["ts"], "master_id": mid, "route": matcher.masters[mid]["route_code"],
                         "from_cam": result["from_cam"], "next_cam": result["next_cam"],
